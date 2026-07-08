@@ -1,42 +1,231 @@
-1) FIFO code
+## Classes (and constraints)
+- Virtual classes (base classes to be extended)
+- Pure virtual functions get overriden
+- Non-virtual functions call actual object not inherited one
+Syntax:
+```
+class Packet;
+  rand bit [7:0] addr;
+  rand bit [3:0] data;
+  rand bit burst_mode;
+
+  constraint c_addr { addr[0] == 0; }
+  constraint c_order { solve addr before data; }
+
+  // optional constructor if non-default
+  function new(...);
+    addr = ..
+  endfunction: new
+
+  function void checkSum(int a, int b, int c);
+    return (a + b == c);
+  endfunction: checkSum
+
+  function void pre_randomize();
+    if (burst_mode) begin
+      addr.rand_mode(0); // turns off randomization
+      addr = 8'h0;
+    end else
+      addr.rand_mode(1)
+  endfunction: pre_randomize
+```
+
+To instantiate:
+```
+Packet pkt = new();
+if (!pkt.randomize() with { data == 4'hF; }) $error("Randomization failed");
+
+## Interfaces and Modports
+```
+interface bus_if(input logic clk);
+  logic valid, ready;
+  logic [7:0] addr;
+  logic [3:0] data;
+
+  clocking drv_cb @(posedge clK);
+    default input #1step output #1;
+    input ready;
+    output data, valid, addr;
+  endclocking
+
+  clocking mon_cb @(negedge clk);
+    default input #1step output #1;
+    input ready, data, valid, addr;
+  endclocking
+
+endinterface: bus_if
+```
+
+## Data structures
+1) Queue
+```
+int q[$]; // int q[$:5] bounded at 6 elements
+q.push_back(1);
+q.delete(0)
+```
+
+2) Fixed array
+```
+int arr[];
+arr = new[4]; // size 4
+```
+
+3) Associative array
+```
+int mem[string]; // string as keys, int as values
+mem["test"] = 5;
+if (mem.exists("test)) // returns 1
+```
+
+4) Structs (packed and unpacked)
+```
+typedef struct packed {
+  bit [7:0] addr, bit [7:0] data } pkt_t; // can do wire[15:0] w = b; because packed
+  
+typedef enum logic {A, B} state_t;
+
+## Concurrency
+1) Fork..join (waits for all)
+2) Fork..join_any (waits for one)
+3) Fork..join_none (waits for none)
+
+### Semaphores
+```
+semaphore sem = new(1); // only 1 key
+
+sem.get(1);
+drive_bus(0;
+sem.put(1);
+```
+
+### Mailbox
+```
+mailbox #(packet) mbx = new(0); // unbounded if 0, bounded if > 0
+
+// Producer does this
+mbx.put(pkt); // blocks if full
+
+// Consumer does this
+packet p;
+mbx.get(p); // blocks if empty
+```
+
+### Event
+```
+event done;
+
+-> done; // triggers event
+wait(done.triggered); // waits for triggered done in same timestep
+```
+
+## FIFO
 ```
 module fifo #(
-  parameter DEPTH=8 // power of two,
-  parameter WIDTH=8
+  parameter DEPTH=8,
+  parameter DW=32,
+  localparam PW=$clog2(DEPTH)
 )(
-  input  logic clk, rst,
-  input  logic we, re,
-  input  logic [DEPTH-1:0] w_data
-  output logic [DEPTH-1:0] r_data
+  input  logic clk, rst_n,
+  input  logic re, we,
+  output logic full, empty,
+  input  logic [DW-1:0] w_data,
+  output logic [DW-1:0] r_data
 );
-  logic [WIDTH-1:0] q [DEPTH-1:0];
-  logic [$clog2(DEPTH)-1:0] r_ptr, w_ptr;
-  logic [$clog2(DEPTH):0] capacity;
+  logic [DW-1:0] Q [DEPTH];
+  logic [PW-1:0] r_ptr, w_ptr;
+  logic [PW:0] capacity;
+
+  logic do_write, do_read;
 
   assign full = (capacity == DEPTH);
   assign empty = (capacity == '0);
+  assign do_write = (we && ~full);
+  assign do_read = (re && ~empty);
 
-  always_ff @(posedge clk, posedge rst) begin
-    if (rst) begin
-      r_data <= '0
-      r_ptr <= '0;
-      w_ptr <= '0;
-      capacity <= '0;
+  always_ff @(posedge clk, negedge rst_n) begin
+    if (~rst_n) begin
+	capacity <= '0;
+	r_ptr <= '0;
+        w_ptr <= '0;
+    end else begin
+	if (do_write) begin
+	  w_ptr <= w_ptr + 1;
+	  Q[w_ptr] <= w_data;
+	end
+    	if (do_read) begin
+	  r_ptr <= r_ptr + 1;
+	  r_data <= Q[r_ptr];
+        end
+        case ({do_write, do_read})
+	 2'b10: capacity <= capacity + 1;
+         2'b01: capacity <= capacity - 1;
+         default: ;
     end
-    else if (re && we) begin
-      r_data <= q[r_ptr];
-      r_ptr <= r_ptr + 1;
-      q[w_ptr] <= w_data;
-      w_ptr <= w_ptr + 1;
-    end
-    else if (re && ~empty) begin
-      r_data <= q[r_ptr];
-      r_ptr <= r_ptr + 1;
-      capacity <= capacity - 1;
-    end
-    else if (we && ~full) begin
-      q[w_ptr] <= w_data;
-      w_ptr <= w_ptr + 1;
-      capacity <= capacity + 1;
-    end
+  end
+endmodule: fifo
 ```
+
+For asynchronous FIFO: add gray-code pointers and 2 FF synchronizers across clock boundaries. <br>
+gray code: grey = (bin >> 1)*bin;
+
+## Round-robin arbiter
+```
+module rr_arbiter #(parameter int N=4) (
+  input  logic clk, rst_n,
+  input  logic [N-1:0] req,
+  output logic [N-1:0] grant
+);
+
+  logic [$clog2(N)-1:0] ptr;
+  int idx;
+
+  always_comb begin
+    grant = '0;
+    if (|req) begin
+      for (int i=0; i<N; i++) begin
+        idx = (ptr + i) % N;
+        if (req[idx]) begin
+          grant[idx] = 1'b1; break;
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk, negedge rst_n) begin
+    if (~rst_n)
+      ptr <= '0;
+    else if (|grant)
+      ptr <= (1 + idx) % N;
+endmodule: rr_arbiter
+```
+
+## Valid-ready handshake
+
+## FSM 
+```
+module fsm (
+  input  logic clk, rst_n,
+  input  logic a, b, c
+  output logic d, e, f
+);
+  typedef enum logic [1:0] {
+    A = 2'd0, B = 2'd1, C = 2'd2, D = 2'd3 } state_t;
+  state_t state, nextState;
+
+  always_comb begin
+    nextState = state;
+    case (state)
+      A: begin
+        if (a) nextState = D;
+      end
+  end
+
+  always_ff @(posedge clk, negedge rst_n) begin
+    if (~rst_n)
+      state <= A;
+    else
+      state <= nextState;
+  end
+```
+
+## SVA
