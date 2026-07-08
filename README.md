@@ -284,3 +284,23 @@ assert property ((@(posedge clk) req[=2] |-> ack)); // ack is true on 2nd non-co
 // System functions
 $past(); $fell(); $stable();
 ```
+
+## Coverage 
+Syntax:
+```
+covergroup <covergroup_name> (<input signal/class>) <@(event)> // event is optional, input is optional if covergroup defined inside class
+	cp_op: coverpoint <signal> {
+		bins arith[] = {[0:3]}; // creates 1 bin each
+		bins logic_op = {[4:7]}; // creates 1 total bin
+		bins mid[4] = {[1:254]}; // split into 4
+		illegal_bins bad = {[8:15]}; //  error if hit
+	}
+
+	//cross
+	x_op_zero: cross <signalA>, <signalB> { // can also be coverpoints
+		ignore_bins n = binsof(cp_op) intersect {[4:7]};
+	}
+```
+		
+
+	
