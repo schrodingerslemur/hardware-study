@@ -84,6 +84,7 @@ typedef struct packed {
   bit [7:0] addr, bit [7:0] data } pkt_t; // can do wire[15:0] w = b; because packed
   
 typedef enum logic {A, B} state_t;
+```
 
 ## Concurrency
 1) Fork..join (waits for all)
