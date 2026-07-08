@@ -34,6 +34,7 @@ To instantiate:
 ```
 Packet pkt = new();
 if (!pkt.randomize() with { data == 4'hF; }) $error("Randomization failed");
+```
 
 ## Interfaces and Modports
 ```
@@ -200,7 +201,32 @@ endmodule: rr_arbiter
 ```
 
 ## Valid-ready handshake
+```
+module skid_stage #(parameter int W=8)
+( input logic clk, rst_n,
+  input  logic         in_valid,  output logic in_ready,
+  input  logic [W-1:0] in_data,
+  output logic         out_valid, input  logic out_ready,
+  output logic [W-1:0] out_data );
 
+  assign in_ready = out_ready || !out_valid; // draining or empty
+  
+  always_ff @(posedge clk, negedge rst_n) begin
+  	if (~rst_n) begin
+		out_valid <= '0;
+		out_data <= '0;
+	end
+	else if (in_valid && in_ready) begin
+		out_data <= in_data;
+		out_valid <= 1'b1;
+	end
+	else if (out_valid && out_ready) begin
+		out_data <= '0; // not required
+		out_valid <= '0;
+	end
+  end
+endmodule: skid_stage
+```
 ## FSM 
 ```
 module fsm (
@@ -229,3 +255,31 @@ module fsm (
 ```
 
 ## SVA
+Immediate and concurrent
+### Concurrent assertions
+Example:
+```
+property p_req_ack;
+	@(posedge clk) disable iff (~rst_n) $rose(req) |-> ##[1:5] ack;
+endproperty
+
+a_req_ack: assert property (p_req_ack) else $error();
+```
+
+```
+// operators
+|->; |=>
+
+// Delay
+##1; ##[1:3];
+
+// Repetition
+[*2] // consecutive
+[=2] // non-consecutive
+
+// example
+assert property ((@(posedge clk) req[=2] |-> ack)); // ack is true on 2nd non-consecutive req
+
+// System functions
+$past(); $fell(); $stable();
+```
