@@ -302,5 +302,14 @@ covergroup <covergroup_name> (<input signal/class>) <@(event)> // event is optio
 	}
 ```
 		
+## Verification plan
+1) Datapath correctness: test using simulation, randomized stimulus and scoreboards using a model.
+2) Control correctness: test using assertions
+3) Protocol correctness: test using assertions
+4) Corner cases: directed tests
+5) Collect functional coverage
+6) Use formal verification to verify control correctness, no illegal states and FSM behavior
 
+> Control correctness = "Is the design's internal behavior/state machine doing the right thing?" <br>
+> Protocol correctness = "Is the design obeying the rules of an interface/communication contract?"
 	
