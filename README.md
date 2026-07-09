@@ -272,10 +272,11 @@ a_req_ack: assert property (p_req_ack) else $error();
 |->; |=>
 
 // Delay
-##1; ##[1:3];
+##1; ##[1:3]; ##[1:$];
 
 // Repetition
 [*2] // consecutive
+[*2:$]; // consecutive for 2 or more times
 [=2] // non-consecutive
 
 // example
